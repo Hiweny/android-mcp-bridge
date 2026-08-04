@@ -21,7 +21,7 @@
 - **原项目**: [calendar0917/DeepseekWeb-enhance](https://github.com/calendar0917/DeepseekWeb-enhance)
 - **原脚本**: [ds-mcp-bridge.user.js](https://github.com/calendar0917/DeepseekWeb-enhance/blob/main/ds-mcp-bridge.user.js)
 - **原始版本**: v4.2.0
-- **本仓库版本**: v4.2.1-mobile
+- **本仓库版本**: v4.3.0-mobile
 
 ### 手机适配改动
 
@@ -33,6 +33,12 @@
 | 面板弹出方向 | 手机上面板从 FAB 下方向下展开，接近全屏宽度 |
 | 触摸友好 | 按钮/输入框/开关增大触摸区域，符合移动端交互规范 |
 | 移动端检测 | 自动识别 UA + 视口宽度，桌面端保持原行为不变 |
+| 自动多轮响应 | 工具调用结果自动注入并发送，无需手动操作 |
+| AI 生成状态跟踪 | 等待 AI 完全响应后再注入工具结果，避免冲突 |
+| SSE 实时解析 | 从完整 responseText 重新解析，正确处理 SET/APPEND 操作 |
+| 工具调用检测 | debounce 200ms，实时检测工具调用格式 |
+| 增强发送按钮查找 | 3 策略查找，适配 DeepSeek 最新 UI |
+| 心跳+自动重连 | 15 秒心跳检测 + 指数退避重连(1/2/4/8/16s) |
 
 ### 安装方法
 
@@ -44,9 +50,11 @@
 
 ### 功能特性
 
-- **MCP JSON-RPC 2.0 服务器** — 基于 NanoHTTPD，支持 `initialize`、`tools/list`、`tools/call` 等标准 MCP 方法
-- **10 个内置工具** — 覆盖时间、设备信息、剪贴板、HTTP 请求、通知、震动、文件操作等
-- **DeepSeek WebView** — 应用内集成 DeepSeek 对话页面，可直接与 AI 交互
+- **MCP JSON-RPC 2.0 服务器** — 基于 NanoHTTPD，支持 `initialize`、`tools/list`、`tools/call`、`ping` 等标准 MCP 方法
+- **35+ 内置工具** — 覆盖文件系统、系统控制、传感器、位置、媒体、应用管理、网络信息、剪贴板历史等
+- **外部 MCP 服务器代理** — 可连接外部 MCP 服务器，代理其工具调用
+- **SSE 实时事件推送** — 支持 Server-Sent Events 端点
+- **工具调用日志** — 查看工具调用历史记录
 - **深色 Material 3 界面** — 现代化深蓝主题，支持动画过渡
 - **前台服务保活** — 确保服务持续运行，不被系统杀掉
 - **工具测试面板** — 内置工具测试功能，可直接在应用内测试任意工具
