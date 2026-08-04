@@ -1710,44 +1710,6 @@
 
       // Refresh
       secExt.querySelector('#ext-refresh')?.addEventListener('click', renderExtTab);
-
-      // Start/Stop/Remove
-      secExt.querySelectorAll('.ext-start').forEach(btn => {
-        btn.onclick = async () => {
-          const name = btn.dataset.name;
-          try {
-            const result = await extApiCall(`/api/external-servers/${name}/start`, 'POST');
-            toast(result.ok ? `${name} 已启动` : result.error, result.ok ? 'success' : 'error');
-            renderExtTab(); refreshStatus();
-          } catch (e) { toast(e.message, 'error'); }
-        };
-      });
-
-      secExt.querySelectorAll('.ext-stop').forEach(btn => {
-        btn.onclick = async () => {
-          const name = btn.dataset.name;
-          try {
-            const result = await extApiCall(`/api/external-servers/${name}/stop`, 'POST');
-            toast(result.ok ? `${name} 已停止` : result.error, result.ok ? 'success' : 'error');
-            renderExtTab(); refreshStatus();
-          } catch (e) { toast(e.message, 'error'); }
-        };
-      });
-
-      secExt.querySelectorAll('.ext-remove').forEach(btn => {
-        btn.onclick = async () => {
-          const name = btn.dataset.name;
-          if (!confirm(`确定删除 ${name}？`)) return;
-          try {
-            const result = await extApiCall(`/api/external-servers/${name}`, 'DELETE');
-            toast(result.ok ? `${name} 已删除` : result.error, result.ok ? 'success' : 'error');
-            renderExtTab(); refreshStatus();
-          } catch (e) { toast(e.message, 'error'); }
-        };
-      });
-
-      // Refresh
-      secExt.querySelector('#ext-refresh').onclick = renderExtTab;
     }
 
     // ═══════════════════════════════════════════════════════════════
