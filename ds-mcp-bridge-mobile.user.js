@@ -19,7 +19,7 @@
 
   const SCRIPT_PREFIX = '[Bridge]';
   const DEFAULT_MCP_URL = 'http://localhost:8024/mcp';
-  const TOOL_CALL_RE = /```mcp:([\w.-]+)\n([\s\S]*?)```/g;
+  const TOOL_CALL_RE = /```mcp[:\s]*([\w.-]+)\s*\n?([\s\S]*?)```/g;
   const SYSTEM_HINT_START = '[系统指令]';
   const SYSTEM_HINT_END = '[系统指令结束]';
   const AUTO_SEND_KEY = 'auto_send';
@@ -151,7 +151,7 @@
           },
           onerror: (e) => reject(new Error(`Network error: ${e.error || 'connection refused'}`)),
           ontimeout: () => reject(new Error('Request timed out')),
-          timeout: 5000,
+          timeout: 15000,
         });
       });
     }
@@ -236,7 +236,7 @@
       }
     }
 
-    // 启动心跳检测（每 30 秒 ping 一次，断线时自动重连）
+    // 启动心跳检测（每 15 秒 ping 一次，断线时自动重连）
     _startHeartbeat() {
       this._stopHeartbeat();
       this._heartbeatTimer = setInterval(async () => {
@@ -247,7 +247,7 @@
           this.connected = false;
           await this.reconnect();
         }
-      }, 30000);
+      }, 15000);
     }
 
     // 停止心跳检测
@@ -258,7 +258,7 @@
       }
     }
 
-    // 自动重连（最多 3 次，每次间隔 2 秒）
+    // 自动重连（最多 5 次，指数退避 1s/2s/4s/8s/16s）
     async reconnect() {
       if (this._reconnecting) return false;
       this._reconnecting = true;
@@ -266,11 +266,13 @@
       this.sessionId = null;
       this.connected = false;
 
-      for (let i = 0; i < this._maxReconnect; i++) {
+      const maxAttempts = 5;
+      for (let i = 0; i < maxAttempts; i++) {
         this._reconnectAttempts++;
-        console.log(`${SCRIPT_PREFIX} Reconnect attempt ${i + 1}/${this._maxReconnect}...`);
-        toast(`正在重连 MCP 服务器 (${i + 1}/${this._maxReconnect})...`, 'info');
-        await new Promise(r => setTimeout(r, 2000)); // 间隔 2 秒
+        const delay = Math.min(1000 * Math.pow(2, i), 16000); // 指数退避
+        console.log(`${SCRIPT_PREFIX} Reconnect attempt ${i + 1}/${maxAttempts} (wait ${delay}ms)...`);
+        toast(`正在重连 MCP 服务器 (${i + 1}/${maxAttempts})...`, 'info');
+        await new Promise(r => setTimeout(r, delay));
         const ok = await this.initialize();
         if (ok) {
           console.log(`${SCRIPT_PREFIX} Reconnected successfully`);
@@ -279,7 +281,7 @@
           return true;
         }
       }
-      console.error(`${SCRIPT_PREFIX} Reconnect failed after ${this._maxReconnect} attempts`);
+      console.error(`${SCRIPT_PREFIX} Reconnect failed after ${maxAttempts} attempts`);
       toast('MCP 重连失败，请检查服务器', 'error');
       this._reconnecting = false;
       return false;
@@ -392,17 +394,17 @@
   function buildToolHint() {
     if (!toolRegistry.length) return '';
     let hint = `${SYSTEM_HINT_START} 你拥有以下 MCP 工具。当用户的需求可以用工具完成时，你必须在回复中调用工具。`;
-    hint += ' 调用格式：用代码块写 ```mcp:工具名``` 后紧跟一个 JSON 代码块写参数。\n\n';
-    hint += '示例：\n```mcp:execute_command\n{"command": "ls -la"}\n```\n\n';
+    hint += '\n调用格式（严格遵守）：\n```mcp:工具名\n{"参数名": "参数值"}\n```\n';
+    hint += '\n示例：\n```mcp:get_time\n{}\n```\n';
+    hint += '\n```mcp:execute_command\n{"command": "ls -la"}\n```\n\n';
     hint += '可用工具列表：\n';
     toolRegistry.forEach(t => {
       hint += `- ${t.name}: ${t.description || ''}`;
       const req = t.inputSchema?.required;
-      if (req?.length) hint += ` (参数: ${req.join(', ')})`;
+      if (req?.length) hint += ` (必填参数: ${req.join(', ')})`;
       hint += '\n';
     });
-    hint += '\n如果不需要工具就正常回答。需要工具时一定要调用。';
-    hint += '\n\n当收到用户发送的 <tool_result> 包裹的文本时，这是你之前调用的工具的执行结果。请基于结果继续回答用户的问题。';
+    hint += '\n规则：\n1. 需要工具时一定要调用，不要只描述\n2. 每次只调用一个工具\n3. 收到 <tool_result> 后基于结果继续回答\n4. 不需要工具就正常回答';
     hint += `\n${SYSTEM_HINT_END}`;
     return hint;
   }
@@ -552,6 +554,9 @@
     if (isCompletion && getModuleEnabled('mcp')) {
       if (body) body = modifyRequest(body);
 
+      // 清空上一轮的工具调用记录，确保每次新请求都能重新检测
+      executedCalls.clear();
+      
       let requestContent = '';
       let requestLastParsed = 0;
 
@@ -560,19 +565,16 @@
           const rt = this.responseText || '';
           if (rt.length <= requestLastParsed) return;
           const newPart = rt.substring(requestLastParsed);
-          // Only parse up to the last complete line to avoid dropping
-          // incomplete `data:` lines split across progress events
-          const lastNewline = newPart.lastIndexOf('\n');
-          if (lastNewline < 0) return; // no complete line yet
-          requestLastParsed += lastNewline + 1;
-          const completePart = newPart.substring(0, lastNewline + 1);
-          const newContent = parseSSEChunk(completePart);
+          requestLastParsed = rt.length;
+          // 直接解析所有新内容，不丢弃不完整行
+          const newContent = parseSSEChunk(newPart);
           if (newContent) requestContent += newContent;
 
+          // 快速检测：200ms debounce（从 1000ms 降低）
           if (_streamDebounce) clearTimeout(_streamDebounce);
           _streamDebounce = setTimeout(() => {
             if (requestContent) checkForToolCalls(requestContent);
-          }, 1000);
+          }, 200);
         } catch { /* ignore */ }
       });
 
@@ -603,6 +605,9 @@
       if (args[1]?.body) {
         args[1].body = modifyRequest(args[1].body);
       }
+
+      // 清空上一轮的工具调用记录
+      executedCalls.clear();
 
       const response = await origFetch.apply(this, args);
       const contentType = response.headers?.get('content-type') || '';
@@ -659,18 +664,18 @@
       }
 
       input.focus();
-      await sleep(150);
+      await sleep(100);
       setInputValue(input, wrappedText);
-      await sleep(300);
+      await sleep(200);
 
       if (!getAutoSendEnabled()) {
         toast('工具结果已填入输入框（自动发送已关闭）', 'info');
         return;
       }
 
-      // 自动发送：优先点击发送按钮，最多重试 3 次
+      // 自动发送：优先点击发送按钮，最多重试 5 次，间隔 200ms
       let sent = false;
-      for (let attempt = 0; attempt < 3 && !sent; attempt++) {
+      for (let attempt = 0; attempt < 5 && !sent; attempt++) {
         const sendBtn = findSendButton();
         if (sendBtn) {
           sendBtn.click();
@@ -678,7 +683,7 @@
           break;
         }
         // 发送按钮未就绪，等待后重试
-        await sleep(300);
+        await sleep(200);
       }
 
       // 回退方案：发送按钮始终找不到时模拟 Enter 键
@@ -687,7 +692,7 @@
       }
 
       toast('工具结果已自动发送', 'success');
-    }, 800);
+    }, 300);
   }
 
   function findInputElement() {
@@ -705,16 +710,50 @@
   }
 
   function findSendButton() {
+    // 策略 1：通过 aria-label 查找（最可靠）
     const selectors = [
       'button[aria-label*="send"]', 'button[aria-label*="Send"]',
       'button[aria-label*="发送"]', 'button[aria-label*="Submit"]',
-      'button[type="submit"]', 'div[role="button"][aria-label*="send"]',
+      'button[aria-label*="提交"]',
+      'div[role="button"][aria-label*="send"]',
       'div[role="button"][aria-label*="发送"]',
+      'div[role="button"][aria-label*="Send"]',
     ];
     for (const sel of selectors) {
       const btn = document.querySelector(sel);
       if (btn && isVisible(btn)) return btn;
     }
+
+    // 策略 2：查找输入框附近的按钮（DeepSeek 常见布局）
+    const input = findInputElement();
+    if (input) {
+      const container = input.closest('form') || input.closest('[class*="input"]') || input.parentElement?.parentElement;
+      if (container) {
+        const btns = container.querySelectorAll('button, div[role="button"]');
+        for (const btn of btns) {
+          if (!isVisible(btn)) continue;
+          // 排除附件、语音等按钮，找发送类按钮
+          const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+          const cls = (btn.className || '').toLowerCase();
+          if (aria.includes('send') || aria.includes('发送') || cls.includes('send')) {
+            return btn;
+          }
+        }
+        // 如果只有一个按钮且不是附件/语音按钮，可能是发送按钮
+        const sendLikeBtns = Array.from(btns).filter(b => {
+          if (!isVisible(b)) return false;
+          const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+          return !aria.includes('attach') && !aria.includes('file') && !aria.includes('voice')
+            && !aria.includes('附件') && !aria.includes('语音') && !aria.includes('文件');
+        });
+        if (sendLikeBtns.length === 1) return sendLikeBtns[0];
+      }
+    }
+
+    // 策略 3：查找 type=submit 的按钮
+    const submitBtn = document.querySelector('button[type="submit"]');
+    if (submitBtn && isVisible(submitBtn)) return submitBtn;
+
     return null;
   }
 
@@ -1229,9 +1268,9 @@
       }
     }
 
-    // 首次检测 + 每 30 秒轮询
+    // 首次检测 + 每 10 秒轮询
     checkConnection();
-    setInterval(checkConnection, 30000);
+    setInterval(checkConnection, 10000);
 
     // ═══════════════════════════════════════════════════════════════
     //  Tab: Test

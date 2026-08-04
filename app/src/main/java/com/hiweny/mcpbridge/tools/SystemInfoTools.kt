@@ -2,6 +2,7 @@ package com.hiweny.mcpbridge.tools
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
@@ -309,7 +310,7 @@ class PackageInfoTool(private val context: Context) : McpTool {
             }
 
             val permissions = JSONArray()
-            packageInfo.requestedPermissions?.forEach { perm ->
+            packageInfo.requestedPermissions?.forEach { perm: String ->
                 permissions.put(perm)
             }
 
@@ -322,7 +323,7 @@ class PackageInfoTool(private val context: Context) : McpTool {
                 put("installTime", packageInfo.firstInstallTime)
                 put("lastUpdateTime", packageInfo.lastUpdateTime)
                 put("apkPath", appInfo?.sourceDir ?: "")
-                put("uid", appInfo?.uid ?: -1)
+                put("uid", appInfo?.uid ?: -1 as Any)
                 put("requestedPermissions", permissions)
                 put("permissionsCount", permissions.length())
             }

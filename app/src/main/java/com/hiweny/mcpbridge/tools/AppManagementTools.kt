@@ -170,7 +170,7 @@ class ListRunningAppsTool(private val context: Context) : McpTool {
         ActivityManager.RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE -> "perceptible"
         ActivityManager.RunningAppProcessInfo.IMPORTANCE_CANT_SAVE_STATE -> "cant_save_state"
         ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE -> "service"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_CACHE -> "cached"
+        ActivityManager.RunningAppProcessInfo.IMPORTANCE_CACHED -> "cached"
         ActivityManager.RunningAppProcessInfo.IMPORTANCE_GONE -> "gone"
         else -> "unknown"
     }
