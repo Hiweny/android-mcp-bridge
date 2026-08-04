@@ -670,11 +670,11 @@
   //  CSS
   // ═══════════════════════════════════════════════════════════════
   const PANEL_CSS = `
-    #mcp-fab{position:fixed;z-index:999999;width:48px;height:48px;border-radius:50%;background:#16a34a;color:#fff;border:none;font-size:22px;cursor:grab;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 12px rgba(22,163,74,.4);user-select:none;-webkit-user-select:none;touch-action:none}
+    #mcp-fab{position:fixed;z-index:999999;width:48px;height:48px;border-radius:50%;background:#1a365d;color:#fff;border:none;font-size:22px;cursor:grab;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 12px rgba(26,54,93,.4);user-select:none;-webkit-user-select:none;touch-action:none}
     #mcp-fab:active{cursor:grabbing}
-    #mcp-fab:hover{transform:scale(1.1);box-shadow:0 4px 20px rgba(22,163,74,.6)}
-    #mcp-fab.disconnected{background:#dc2626;box-shadow:0 2px 12px rgba(220,38,38,.4)}
-    #mcp-fab.disconnected:hover{box-shadow:0 4px 20px rgba(220,38,38,.6)}
+    #mcp-fab:hover{transform:scale(1.1);box-shadow:0 4px 20px rgba(26,54,93,.6)}
+    #mcp-fab.disconnected{background:#2a4365;box-shadow:0 2px 12px rgba(42,67,101,.4)}
+    #mcp-fab.disconnected:hover{box-shadow:0 4px 20px rgba(42,67,101,.6)}
 
     #mcp-panel{position:fixed;z-index:999998;width:min(460px, calc(100vw - 16px));max-height:min(75vh, calc(100vh - 20px));background:#16161e;color:#eee;border:1px solid #333;border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.6);font-family:system-ui;font-size:14px;display:none;flex-direction:column;overflow:hidden}
     #mcp-panel.open{display:flex}
@@ -695,8 +695,8 @@
 
     .mcp-btn{padding:6px 12px;border-radius:8px;border:1px solid #444;background:#222;color:#eee;font-size:12px;cursor:pointer;transition:background .15s}
     .mcp-btn:hover{background:#333}
-    .mcp-btn.pri{background:#16a34a;border-color:#16a34a;color:#fff}
-    .mcp-btn.pri:hover{background:#15803d}
+    .mcp-btn.pri{background:#1a365d;border-color:#1a365d;color:#fff}
+    .mcp-btn.pri:hover{background:#2a4365}
     .mcp-input{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #444;background:#1a1a28;color:#eee;font-size:13px;box-sizing:border-box;outline:none}
     .mcp-input:focus{border-color:#7aa2f7}
     .mcp-input::placeholder{color:#555}
@@ -916,10 +916,10 @@
     // ── FAB initial position: mobile vs desktop ──
     const _isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (_isMobile) {
-      // Mobile: top-right, below the share button, doesn't block send
-      fab.style.right = '8px';
+      // Mobile: top-right corner, covering the share button
+      fab.style.right = '4px';
       fab.style.left = 'auto';
-      fab.style.top = '52px';
+      fab.style.top = '4px';
     } else {
       // Desktop: bottom-right (original)
       fab.style.right = '20px';

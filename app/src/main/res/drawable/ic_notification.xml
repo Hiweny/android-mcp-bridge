@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 终端提示符造型 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M8,6L14,12L8,18L9.5,19.5L17,12L9.5,4.5Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M16,18H20V20H16Z" />
+</vector>

@@ -1,0 +1,10 @@
+<resources>
+    <!-- Base XML theme. The actual UI is rendered by Jetpack Compose (McpBridgeTheme).
+         This theme only needs to be valid (no action bar, dark background). -->
+    <style name="Theme.AndroidMcpBridge" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/background_dark</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
