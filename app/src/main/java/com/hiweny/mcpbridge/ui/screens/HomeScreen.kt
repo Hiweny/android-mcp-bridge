@@ -23,7 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
@@ -67,14 +67,13 @@ fun HomeScreen(
     onStopClick: () -> Unit,
     onNavigateTools: () -> Unit,
     onNavigateSettings: () -> Unit,
-    onNavigateWebView: () -> Unit,
+    onNavigateLogs: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val connectionUrl = "http://$ipAddress:$port"
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
 
-    // 运行计时（秒）
     var uptimeSeconds by remember { mutableLongStateOf(0L) }
     LaunchedEffect(isRunning) {
         if (isRunning) {
@@ -102,14 +101,14 @@ fun HomeScreen(
             color = MaterialTheme.colorScheme.onBackground
         )
 
-        // 状态卡片（带渐变强调）
+        // 状态卡片
         StatusCard(
             isRunning = isRunning,
             port = port,
             ipAddress = ipAddress
         )
 
-        // 启动 / 停止按钮（交叉淡入淡出）
+        // 启动 / 停止按钮
         Crossfade(
             targetState = isRunning,
             animationSpec = tween(300),
@@ -211,7 +210,7 @@ fun HomeScreen(
             }
         }
 
-        // 导航按钮：工具 & 设置
+        // 导航按钮：工具 & 日志 & 设置
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             FilledTonalButton(
                 onClick = onNavigateTools,
@@ -220,32 +219,49 @@ fun HomeScreen(
             ) {
                 Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("工具列表", style = MaterialTheme.typography.labelLarge)
+                Text("工具", style = MaterialTheme.typography.labelLarge)
             }
             FilledTonalButton(
-                onClick = onNavigateSettings,
+                onClick = onNavigateLogs,
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("设置", style = MaterialTheme.typography.labelLarge)
+                Text("日志", style = MaterialTheme.typography.labelLarge)
             }
         }
 
-        // DeepSeek WebView 快捷入口
-        Button(
-            onClick = onNavigateWebView,
+        FilledTonalButton(
+            onClick = onNavigateSettings,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-            )
+            shape = RoundedCornerShape(14.dp)
         ) {
-            Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("打开 DeepSeek 对话", style = MaterialTheme.typography.titleMedium)
+            Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("设置", style = MaterialTheme.typography.labelLarge)
+        }
+
+        // 使用说明
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "使用说明",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "1. 启动服务后，在 DeepSeek 网页端安装油猴脚本\n2. 脚本会自动连接到本服务器\n3. AI 调用工具后结果会自动返回\n4. 支持多轮工具调用，无需手动发送",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = androidx.compose.ui.unit.TextUnit(20f, androidx.compose.ui.unit.TextUnitType.Sp)
+                )
+            }
         }
 
         Spacer(Modifier.height(8.dp))

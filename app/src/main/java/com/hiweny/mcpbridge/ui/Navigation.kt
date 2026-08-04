@@ -8,9 +8,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.hiweny.mcpbridge.McpViewModel
 import com.hiweny.mcpbridge.ui.screens.HomeScreen
+import com.hiweny.mcpbridge.ui.screens.LogsScreen
 import com.hiweny.mcpbridge.ui.screens.SettingsScreen
 import com.hiweny.mcpbridge.ui.screens.ToolsScreen
-import com.hiweny.mcpbridge.ui.screens.WebViewScreen
 
 /**
  * 导航路由定义。
@@ -18,17 +18,12 @@ import com.hiweny.mcpbridge.ui.screens.WebViewScreen
 sealed class Route(val route: String) {
     object Home : Route("home")
     object Tools : Route("tools")
-    object WebView : Route("webview")
+    object Logs : Route("logs")
     object Settings : Route("settings")
 }
 
 /**
  * 应用导航图。
- *
- * @param navController 导航控制器
- * @param viewModel 全局状态 ViewModel
- * @param onStartServer 启动服务回调
- * @param onStopServer 停止服务回调
  */
 @Composable
 fun McpNavHost(
@@ -49,14 +44,14 @@ fun McpNavHost(
 
             HomeScreen(
                 isRunning = isRunning,
-                port = port.toIntOrNull() ?: 2730,
+                port = port.toIntOrNull() ?: 8024,
                 ipAddress = ipAddress,
                 toolCount = toolCount,
                 onStartClick = onStartServer,
                 onStopClick = onStopServer,
                 onNavigateTools = { navController.navigate(Route.Tools.route) },
                 onNavigateSettings = { navController.navigate(Route.Settings.route) },
-                onNavigateWebView = { navController.navigate(Route.WebView.route) }
+                onNavigateLogs = { navController.navigate(Route.Logs.route) }
             )
         }
 
@@ -68,15 +63,16 @@ fun McpNavHost(
             )
         }
 
-        composable(Route.WebView.route) {
-            val port by viewModel.port.collectAsState()
-            WebViewScreen(serverPort = port.toIntOrNull() ?: 8024)
+        composable(Route.Logs.route) {
+            val logs by viewModel.logs.collectAsState()
+            LogsScreen(logs = logs)
         }
 
         composable(Route.Settings.route) {
             val port by viewModel.port.collectAsState()
             val autoStart by viewModel.autoStart.collectAsState()
             val keepScreenOn by viewModel.keepScreenOn.collectAsState()
+            val externalServers by viewModel.externalServers.collectAsState()
 
             SettingsScreen(
                 port = port,
@@ -84,7 +80,10 @@ fun McpNavHost(
                 autoStart = autoStart,
                 onAutoStartChange = viewModel::setAutoStart,
                 keepScreenOn = keepScreenOn,
-                onKeepScreenOnChange = viewModel::setKeepScreenOn
+                onKeepScreenOnChange = viewModel::setKeepScreenOn,
+                externalServers = externalServers,
+                onAddExternalServer = viewModel::addExternalServer,
+                onRemoveExternalServer = viewModel::removeExternalServer
             )
         }
     }

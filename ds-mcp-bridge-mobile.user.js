@@ -115,6 +115,15 @@
       this.sessionId = null;
       this._nextId = 1;
       this.connected = false;
+      // tools/list 结果缓存（initialize 后缓存，避免每次都请求）
+      this._toolsCache = null;
+      this._toolsCacheTime = 0;
+      this._toolsCacheTTL = 60000; // 缓存有效期 60 秒
+      // 心跳与自动重连
+      this._heartbeatTimer = null;
+      this._reconnectAttempts = 0;
+      this._maxReconnect = 3;
+      this._reconnecting = false;
     }
 
     _post(body) {
@@ -142,7 +151,7 @@
           },
           onerror: (e) => reject(new Error(`Network error: ${e.error || 'connection refused'}`)),
           ontimeout: () => reject(new Error('Request timed out')),
-          timeout: 30000,
+          timeout: 5000,
         });
       });
     }
@@ -162,21 +171,45 @@
         });
         this.sessionId = result.sessionId;
         this.connected = true;
+        this._reconnectAttempts = 0; // 重置重连计数
+        this._toolsCache = null;     // 重置工具缓存
         await this._post({ jsonrpc: '2.0', method: 'notifications/initialized' });
+        this._startHeartbeat();      // 启动心跳检测
         console.log(`${SCRIPT_PREFIX} MCP connected: ${this.sessionId}`);
         return true;
       } catch (e) { console.error(`${SCRIPT_PREFIX} Init failed:`, e.message); this.connected = false; return false; }
     }
 
-    async listTools() {
+    async listTools(force = false) {
       if (!this.connected) await this.initialize();
+      // 使用缓存：非强制刷新且缓存有效时直接返回，避免每次都请求
+      const now = Date.now();
+      if (!force && this._toolsCache && (now - this._toolsCacheTime < this._toolsCacheTTL)) {
+        console.log(`${SCRIPT_PREFIX} listTools: using cache (${this._toolsCache.length} tools)`);
+        return this._toolsCache;
+      }
       const result = await this._rpc('tools/list');
-      return result.tools || [];
+      this._toolsCache = result.tools || [];
+      this._toolsCacheTime = now;
+      console.log(`${SCRIPT_PREFIX} listTools: fetched ${this._toolsCache.length} tools (cached)`);
+      return this._toolsCache;
     }
 
     async callTool(name, args = {}) {
       if (!this.connected) await this.initialize();
-      return this._rpc('tools/call', { name, arguments: args });
+      try {
+        return await this._rpc('tools/call', { name, arguments: args });
+      } catch (e) {
+        // 工具调用失败 — 尝试重连后重试一次
+        console.warn(`${SCRIPT_PREFIX} callTool failed, attempting reconnect:`, e.message);
+        this.connected = false;
+        this._stopHeartbeat();
+        const ok = await this.reconnect();
+        if (ok) {
+          return await this._rpc('tools/call', { name, arguments: args });
+        }
+        throw e;
+      }
     }
 
     async checkHealth() {
@@ -191,6 +224,83 @@
         return resp.status === 'ok';
       } catch { return false; }
     }
+
+    // JSON-RPC ping 心跳检测
+    async ping() {
+      if (!this.connected) return false;
+      try {
+        await this._rpc('ping');
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    // 启动心跳检测（每 30 秒 ping 一次，断线时自动重连）
+    _startHeartbeat() {
+      this._stopHeartbeat();
+      this._heartbeatTimer = setInterval(async () => {
+        if (!this.connected) { this._stopHeartbeat(); return; }
+        const alive = await this.ping();
+        if (!alive) {
+          console.warn(`${SCRIPT_PREFIX} Heartbeat: no response, attempting reconnect...`);
+          this.connected = false;
+          await this.reconnect();
+        }
+      }, 30000);
+    }
+
+    // 停止心跳检测
+    _stopHeartbeat() {
+      if (this._heartbeatTimer) {
+        clearInterval(this._heartbeatTimer);
+        this._heartbeatTimer = null;
+      }
+    }
+
+    // 自动重连（最多 3 次，每次间隔 2 秒）
+    async reconnect() {
+      if (this._reconnecting) return false;
+      this._reconnecting = true;
+      this._stopHeartbeat();
+      this.sessionId = null;
+      this.connected = false;
+
+      for (let i = 0; i < this._maxReconnect; i++) {
+        this._reconnectAttempts++;
+        console.log(`${SCRIPT_PREFIX} Reconnect attempt ${i + 1}/${this._maxReconnect}...`);
+        toast(`正在重连 MCP 服务器 (${i + 1}/${this._maxReconnect})...`, 'info');
+        await new Promise(r => setTimeout(r, 2000)); // 间隔 2 秒
+        const ok = await this.initialize();
+        if (ok) {
+          console.log(`${SCRIPT_PREFIX} Reconnected successfully`);
+          toast('MCP 服务器已重新连接', 'success');
+          this._reconnecting = false;
+          return true;
+        }
+      }
+      console.error(`${SCRIPT_PREFIX} Reconnect failed after ${this._maxReconnect} attempts`);
+      toast('MCP 重连失败，请检查服务器', 'error');
+      this._reconnecting = false;
+      return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Global MCP Client Singleton (复用连接，url 变化时自动重建)
+  // ═══════════════════════════════════════════════════════════════
+  let _mcpClient = null;
+  let _mcpClientUrl = null;
+
+  function getMCPClient() {
+    const mcpUrl = GM_getValue('mcp_url', DEFAULT_MCP_URL);
+    if (!_mcpClient || _mcpClientUrl !== mcpUrl) {
+      if (_mcpClient) _mcpClient._stopHeartbeat();
+      _mcpClient = new MCPClient(mcpUrl);
+      _mcpClientUrl = mcpUrl;
+      console.log(`${SCRIPT_PREFIX} MCPClient singleton (re)created for ${mcpUrl}`);
+    }
+    return _mcpClient;
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -513,8 +623,7 @@
   //  Tool Execution & Result Injection
   // ═══════════════════════════════════════════════════════════════
   async function executeToolCall(toolName, args) {
-    const mcpUrl = GM_getValue('mcp_url', DEFAULT_MCP_URL);
-    const client = new MCPClient(mcpUrl);
+    const client = getMCPClient();
 
     try {
       toast(`调用工具: ${toolName}...`, 'info');
@@ -545,27 +654,40 @@
 
       const input = findInputElement();
       if (!input) {
-        toast('找不到聊天输入框', 'error');
+        toast('找不到聊天输入框，请手动发送工具结果', 'error');
         return;
       }
 
       input.focus();
-      await sleep(200);
+      await sleep(150);
       setInputValue(input, wrappedText);
-      await sleep(500);
+      await sleep(300);
 
       if (!getAutoSendEnabled()) {
-        toast('工具结果已填入输入框', 'info');
+        toast('工具结果已填入输入框（自动发送已关闭）', 'info');
         return;
       }
 
-      simulateEnter(input);
-      await sleep(300);
-      const sendBtn = findSendButton();
-      if (sendBtn) sendBtn.click();
+      // 自动发送：优先点击发送按钮，最多重试 3 次
+      let sent = false;
+      for (let attempt = 0; attempt < 3 && !sent; attempt++) {
+        const sendBtn = findSendButton();
+        if (sendBtn) {
+          sendBtn.click();
+          sent = true;
+          break;
+        }
+        // 发送按钮未就绪，等待后重试
+        await sleep(300);
+      }
 
-      toast('工具结果已发送', 'success');
-    }, 1500);
+      // 回退方案：发送按钮始终找不到时模拟 Enter 键
+      if (!sent) {
+        simulateEnter(input);
+      }
+
+      toast('工具结果已自动发送', 'success');
+    }, 800);
   }
 
   function findInputElement() {
@@ -955,7 +1077,7 @@
     async function refreshStatus() {
       const mcpUrl = GM_getValue('mcp_url', DEFAULT_MCP_URL);
       secStatus.innerHTML = '<div class="mcp-status">连接中...</div>';
-      const client = new MCPClient(mcpUrl);
+      const client = getMCPClient();
       const healthy = await client.checkHealth();
 
       if (!healthy) {
@@ -988,7 +1110,7 @@
         healthInfo = resp;
       } catch { }
 
-      const tools = await client.listTools();
+      const tools = await client.listTools(true); // 强制刷新（状态页手动刷新）
       toolRegistry = tools;
       fab.classList.remove('disconnected');
 
@@ -1060,11 +1182,25 @@
 
         const nowOk = resp.status === 'ok';
         if (_healthConnected === false && nowOk) {
-          // 刚恢复连接 — 自动重新加载工具列表
-          toast('服务器已恢复连接，正在重新加载...', 'success');
-          refreshStatus();
+          // 刚恢复连接 — 重新初始化 MCP 客户端并重新加载工具列表
+          toast('服务器已恢复连接，正在重新加载工具...', 'success');
+          const client = getMCPClient();
+          client.connected = false; // 强制重新 initialize
+          try {
+            toolRegistry = await client.listTools(true);
+            console.log(`${SCRIPT_PREFIX} Reloaded ${toolRegistry.length} tools after reconnection`);
+          } catch (e) {
+            console.error(`${SCRIPT_PREFIX} Reload tools failed:`, e.message);
+          }
         } else if (_healthConnected === null && nowOk) {
-          // 首次检测到已连接
+          // 首次检测到已连接 — 预加载工具列表到缓存
+          try {
+            const client = getMCPClient();
+            toolRegistry = await client.listTools();
+            console.log(`${SCRIPT_PREFIX} Preloaded ${toolRegistry.length} tools on first connect`);
+          } catch (e) {
+            console.warn(`${SCRIPT_PREFIX} Preload tools failed:`, e.message);
+          }
         }
         _healthConnected = nowOk;
         fab.classList.toggle('disconnected', !nowOk);
@@ -1073,7 +1209,22 @@
           _healthConnected = false;
           fab.classList.add('disconnected');
           toolRegistry = [];
-          toast('服务器连接断开，请检查 MCP 服务器是否运行中', 'error');
+          toast('服务器连接断开，正在尝试自动重连...', 'error');
+          // 触发 MCP 客户端自动重连（最多 3 次，间隔 2 秒）
+          const client = getMCPClient();
+          if (!client._reconnecting) {
+            client.reconnect().then(ok => {
+              if (ok) {
+                _healthConnected = true;
+                fab.classList.remove('disconnected');
+                // 重连成功后重新加载工具列表
+                client.listTools(true).then(tools => {
+                  toolRegistry = tools;
+                  toast('MCP 服务器已重新连接', 'success');
+                }).catch(() => { });
+              }
+            });
+          }
         }
       }
     }
@@ -1148,8 +1299,7 @@
         });
 
         resultDiv.innerHTML = '<div class="mcp-result">执行中...</div>';
-        const mcpUrl = GM_getValue('mcp_url', DEFAULT_MCP_URL);
-        const client = new MCPClient(mcpUrl);
+        const client = getMCPClient();
         try {
           const result = await client.callTool(toolName, args);
           const text = result?.content?.[0]?.text || '(no result)';

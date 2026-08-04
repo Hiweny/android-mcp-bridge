@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -47,6 +47,8 @@ import com.hiweny.mcpbridge.service.McpForegroundService
 import com.hiweny.mcpbridge.tools.DefaultTools
 import com.hiweny.mcpbridge.ui.McpNavHost
 import com.hiweny.mcpbridge.ui.Route
+import com.hiweny.mcpbridge.ui.screens.ExternalServerInfo
+import com.hiweny.mcpbridge.ui.screens.LogEntry
 import com.hiweny.mcpbridge.ui.screens.ToolInfo
 import com.hiweny.mcpbridge.ui.theme.McpBridgeTheme
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,6 +90,12 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _tools = MutableStateFlow<List<ToolInfo>>(emptyList())
     val tools: StateFlow<List<ToolInfo>> = _tools.asStateFlow()
+
+    private val _logs = MutableStateFlow<List<LogEntry>>(emptyList())
+    val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
+
+    private val _externalServers = MutableStateFlow<List<ExternalServerInfo>>(emptyList())
+    val externalServers: StateFlow<List<ExternalServerInfo>> = _externalServers.asStateFlow()
 
     init {
         refreshTools()
@@ -152,9 +160,29 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
         _toolCount.value = count
     }
 
+    fun addLog(entry: LogEntry) {
+        val current = _logs.value.toMutableList()
+        current.add(0, entry)
+        if (current.size > 200) current.removeAt(current.lastIndex)
+        _logs.value = current
+    }
+
+    fun addExternalServer(name: String, url: String) {
+        val current = _externalServers.value.toMutableList()
+        current.add(ExternalServerInfo(name = name, url = url, connected = false))
+        _externalServers.value = current
+    }
+
+    fun removeExternalServer(index: Int) {
+        val current = _externalServers.value.toMutableList()
+        if (index in current.indices) {
+            current.removeAt(index)
+            _externalServers.value = current
+        }
+    }
+
     /**
      * 测试调用工具并返回结果字符串。
-     * 注意：ToolsScreen 已在 IO 线程调用本方法，此处用 runBlocking 桥接 suspend execute。
      */
     fun testTool(name: String, args: JSONObject): String {
         val tool: McpTool? = toolRegistry.get(name)
@@ -174,7 +202,6 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         return try {
-            // 若输出本身是 JSON，则美化展示
             val parsed = JSONObject(result.output)
             json.put("output_pretty", parsed.toString(2))
             json.toString(2)
@@ -190,7 +217,7 @@ class MainActivity : ComponentActivity() {
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { _ -> /* 结果忽略，已尽力请求 */ }
+    ) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -202,7 +229,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Android 13+ 请求通知权限（前台服务通知需要） */
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val granted = ContextCompat.checkSelfPermission(
@@ -215,7 +241,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 启动前台服务 */
     private fun startServer() {
         val port = viewModel.port.value.toIntOrNull() ?: 8024
         val intent = Intent(this, McpForegroundService::class.java).apply {
@@ -226,7 +251,6 @@ class MainActivity : ComponentActivity() {
         viewModel.setRunning(true)
     }
 
-    /** 停止前台服务 */
     private fun stopServer() {
         val intent = Intent(this, McpForegroundService::class.java).apply {
             action = McpForegroundService.ACTION_STOP
@@ -242,7 +266,6 @@ class MainActivity : ComponentActivity() {
         val currentBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = currentBackStackEntry?.destination?.route
 
-        // 屏幕常亮处理
         val keepScreenOn by viewModel.keepScreenOn.collectAsState()
         val context = LocalContext.current
         LaunchedEffect(keepScreenOn) {
@@ -313,7 +336,7 @@ class MainActivity : ComponentActivity() {
     private fun titleForRoute(route: String?): String = when (route) {
         Route.Home.route -> "MCP Bridge"
         Route.Tools.route -> "工具"
-        Route.WebView.route -> "DeepSeek"
+        Route.Logs.route -> "日志"
         Route.Settings.route -> "设置"
         else -> "MCP Bridge"
     }
@@ -321,7 +344,7 @@ class MainActivity : ComponentActivity() {
     private fun bottomNavItems(): List<BottomNavItem> = listOf(
         BottomNavItem(Route.Home, "首页", Icons.Filled.Home),
         BottomNavItem(Route.Tools, "工具", Icons.Filled.Build),
-        BottomNavItem(Route.WebView, "对话", Icons.Filled.Public),
+        BottomNavItem(Route.Logs, "日志", Icons.Filled.ReceiptLong),
         BottomNavItem(Route.Settings, "设置", Icons.Filled.Settings)
     )
 }

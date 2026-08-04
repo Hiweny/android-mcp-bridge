@@ -12,14 +12,12 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.hiweny.mcpbridge.MainActivity
 import com.hiweny.mcpbridge.R
+import com.hiweny.mcpbridge.mcp.ExternalMcpManager
 import com.hiweny.mcpbridge.mcp.ToolRegistry
 import com.hiweny.mcpbridge.tools.DefaultTools
 
 /**
  * MCP 前台服务：托管 [McpHttpServer]，保持进程存活并展示常驻通知。
- *
- * 由 [MainActivity] 通过 ACTION_START / ACTION_STOP 控制，
- * 端口号通过 [EXTRA_PORT] 传入。
  */
 class McpForegroundService : Service() {
 
@@ -28,10 +26,11 @@ class McpForegroundService : Service() {
         const val ACTION_STOP = "com.hiweny.mcpbridge.action.STOP"
         const val EXTRA_PORT = "extra_port"
         private const val CHANNEL_ID = "mcp_service_channel"
-        private const val NOTIFICATION_ID = 2730
+        private const val NOTIFICATION_ID = 8024
     }
 
     private var httpServer: McpHttpServer? = null
+    private var externalMcpManager: ExternalMcpManager? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -54,8 +53,8 @@ class McpForegroundService : Service() {
     private fun startServer(port: Int) {
         if (httpServer != null) return
         val registry = ToolRegistry().also { DefaultTools.registerAll(it, this) }
-        httpServer = McpHttpServer(port, registry).also { server ->
-            // NanoHTTPD 在后台线程提供请求，start() 不会阻塞
+        externalMcpManager = ExternalMcpManager()
+        httpServer = McpHttpServer(port, registry, externalMcpManager).also { server ->
             server.start()
         }
     }
@@ -63,14 +62,13 @@ class McpForegroundService : Service() {
     private fun stopServer() {
         httpServer?.stop()
         httpServer = null
+        externalMcpManager = null
     }
 
     override fun onDestroy() {
         super.onDestroy()
         stopServer()
     }
-
-    // ── 前台通知 ──
 
     private fun startForegroundCompat(port: Int) {
         createNotificationChannel()
@@ -79,7 +77,6 @@ class McpForegroundService : Service() {
 
     private fun startForegroundWithType(notification: Notification) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10+ 需显式声明前台服务类型（manifest 中为 dataSync）
             startForeground(
                 NOTIFICATION_ID,
                 notification,
