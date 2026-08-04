@@ -76,7 +76,7 @@ jobs:
           tag: "latest"
           name: "Latest Build"
           body: |
-            ## MCP Bridge APK
+            ## MCP Bridge APK v2.0
 
             自动构建的最新版本 APK。
 
@@ -86,10 +86,13 @@ jobs:
             3. 点击安装即可
 
             ### 功能
-            - MCP JSON-RPC 2.0 服务器
-            - 内置 10+ 工具（时间、设备信息、剪贴板、HTTP请求等）
-            - DeepSeek 对话 WebView
+            - MCP JSON-RPC 2.0 服务器 (端口 8024)
+            - 内置 35+ 工具（文件系统、系统控制、传感器、位置、媒体、应用管理等）
+            - 外部 MCP 服务器代理连接
+            - 油猴脚本完美适配 (自动多轮工具调用)
             - 深色 Material 3 界面
+            - SSE 实时事件推送
+            - 工具调用日志查看
           allowUpdates: true
           makeLatest: true
           token: ${{ secrets.GITHUB_TOKEN }}

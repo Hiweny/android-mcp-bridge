@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         DS MCP Bridge
 // @namespace    https://github.com/calendar0917/ds-enhance
-// @version      4.2.1-mobile
-// @description  AI Chat 增强 — MCP 工具调用 + TTS 朗读 + 多站点适配 + 手机端适配
+// @version      4.3.0-mobile
+// @description  AI Chat 增强 — MCP 工具调用 + TTS 朗读 + 多站点适配 + 手机端适配 + 自动多轮响应
 // @author       ds-enhance
 // @match        https://chat.deepseek.com/*
 // @match        https://chat.openai.com/*
@@ -445,11 +445,12 @@
   // ═══════════════════════════════════════════════════════════════
   const executedCalls = new Set();
   let _streamDebounce = null;
+  let _aiGenerating = false; // AI 是否正在生成响应
 
   function checkForToolCalls(content) {
     if (!content || !toolRegistry.length) return;
 
-    // Strategy 1: Match ```mcp:tool_name\n{...}\n```
+    // 正则匹配 ```mcp:tool_name\n{...}\n``` 格式
     const re = new RegExp(TOOL_CALL_RE.source, 'g');
     let match;
     while ((match = re.exec(content)) !== null) {
@@ -457,7 +458,22 @@
       const rawArgs = match[2].trim();
       let args = {};
       try { args = JSON.parse(rawArgs); }
-      catch { args = { input: rawArgs }; }
+      catch {
+        // JSON 解析失败，尝试提取 { } 之间的内容
+        const braceMatch = rawArgs.match(/\{[\s\S]*\}/);
+        if (braceMatch) {
+          try { args = JSON.parse(braceMatch[0]); }
+          catch { args = { input: rawArgs }; }
+        } else {
+          args = {};
+        }
+      }
+
+      // 验证工具是否存在
+      if (!toolRegistry.find(t => t.name === toolName)) {
+        console.warn(`${SCRIPT_PREFIX} Unknown tool: ${toolName}`);
+        continue;
+      }
 
       const key = toolName + ':' + JSON.stringify(args);
       if (executedCalls.has(key)) continue;
@@ -465,33 +481,6 @@
 
       console.log(`${SCRIPT_PREFIX} Tool call: ${toolName}`, args);
       executeToolCall(toolName, args);
-    }
-
-    // Strategy 2: Match registered tool names directly
-    // Handles SSE token boundary truncation
-    for (const tool of toolRegistry) {
-      const name = tool.name;
-      const idx = content.indexOf(name);
-      if (idx === -1) continue;
-
-      const afterName = content.substring(idx + name.length);
-      const braceStart = afterName.indexOf('{');
-      if (braceStart === -1) continue;
-
-      const braceEnd = afterName.indexOf('}', braceStart);
-      if (braceEnd === -1) continue;
-
-      const jsonStr = afterName.substring(braceStart, braceEnd + 1);
-      let args = {};
-      try { args = JSON.parse(jsonStr); }
-      catch { args = { input: jsonStr }; }
-
-      const key = name + ':' + JSON.stringify(args);
-      if (executedCalls.has(key)) continue;
-      executedCalls.add(key);
-
-      console.log(`${SCRIPT_PREFIX} Tool call: ${name}`, args);
-      executeToolCall(name, args);
     }
   }
 
@@ -509,12 +498,19 @@
       try {
         const obj = JSON.parse(jsonStr);
 
-        // DeepSeek native: {"p":"response/content","o":"SET","v":"text"}
+        // DeepSeek native: {"p":"response/content","o":"SET|APPEND","v":"text"}
         const v = obj.v;
         if (typeof v === 'string' && v.length > 0) {
           const p = obj.p || '';
+          const o = obj.o || 'APPEND';
           if (!p.includes('fragments') && !p.includes('status')) {
-            content += v;
+            if (o === 'SET') {
+              // SET 操作：v 是完整文本，替换而非累加
+              content = v;
+            } else {
+              // APPEND 操作：v 是增量文本，累加
+              content += v;
+            }
           }
           continue;
         }
@@ -556,6 +552,7 @@
 
       // 清空上一轮的工具调用记录，确保每次新请求都能重新检测
       executedCalls.clear();
+      _aiGenerating = true; // 标记 AI 正在生成
       
       let requestContent = '';
       let requestLastParsed = 0;
@@ -564,11 +561,9 @@
         try {
           const rt = this.responseText || '';
           if (rt.length <= requestLastParsed) return;
-          const newPart = rt.substring(requestLastParsed);
           requestLastParsed = rt.length;
-          // 直接解析所有新内容，不丢弃不完整行
-          const newContent = parseSSEChunk(newPart);
-          if (newContent) requestContent += newContent;
+          // 从完整的 SSE 流重新解析，确保 SET 操作正确处理
+          requestContent = parseSSEChunk(rt);
 
           // 快速检测：200ms debounce（从 1000ms 降低）
           if (_streamDebounce) clearTimeout(_streamDebounce);
@@ -589,6 +584,7 @@
         } catch { /* ignore */ }
         if (_streamDebounce) clearTimeout(_streamDebounce);
         checkForToolCalls(requestContent);
+        _aiGenerating = false; // AI 响应完成
       });
     }
 
@@ -608,6 +604,7 @@
 
       // 清空上一轮的工具调用记录
       executedCalls.clear();
+      _aiGenerating = true;
 
       const response = await origFetch.apply(this, args);
       const contentType = response.headers?.get('content-type') || '';
@@ -616,7 +613,8 @@
       clone.text().then(text => {
         const content = parseSSEChunk(text);
         if (content) checkForToolCalls(content);
-      }).catch(() => { });
+        _aiGenerating = false;
+      }).catch(() => { _aiGenerating = false; });
 
       return response;
     }
@@ -638,6 +636,15 @@
 
       toast(isError ? `${toolName} 失败` : `${toolName} 完成`, isError ? 'error' : 'success');
 
+      // 等待 AI 完全响应后再注入结果
+      let waitCount = 0;
+      while (_aiGenerating && waitCount < 50) {
+        await sleep(100);
+        waitCount++;
+      }
+      // 额外等待 200ms 确保 UI 更新
+      await sleep(200);
+
       if (!isError && (toolName === 'read_file' || toolName === 'list_directory')) {
         const filename = (args.path || args.filename || 'tool_result.txt').split('/').pop().split('\\').pop();
         addToolFileResult(filename, resultText, 'text/plain');
@@ -649,6 +656,13 @@
     } catch (e) {
       toast(`工具调用失败: ${e.message}`, 'error');
       console.error(`${SCRIPT_PREFIX} Tool error:`, e);
+      // 等待 AI 完全响应后再注入错误
+      let waitCount = 0;
+      while (_aiGenerating && waitCount < 50) {
+        await sleep(100);
+        waitCount++;
+      }
+      await sleep(200);
       injectResultToChat(`Error: ${e.message}`);
     }
   }
@@ -692,7 +706,7 @@
       }
 
       toast('工具结果已自动发送', 'success');
-    }, 300);
+    }, 100);
   }
 
   function findInputElement() {
@@ -989,7 +1003,7 @@
     panel.id = 'mcp-panel';
     panel.innerHTML = `
       <div class="hd">
-        <h3>DS MCP Bridge <span class="ver">v4.2.1-mobile</span></h3>
+        <h3>DS MCP Bridge <span class="ver">v4.3.0-mobile</span></h3>
         <button class="cls">&times;</button>
       </div>
       <div id="mcp-tabs">
