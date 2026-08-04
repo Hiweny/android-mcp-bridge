@@ -71,7 +71,7 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
-    private val _port = MutableStateFlow("2730")
+    private val _port = MutableStateFlow("8024")
     val port: StateFlow<String> = _port.asStateFlow()
 
     private val _ipAddress = MutableStateFlow("192.168.1.100")
@@ -91,6 +91,28 @@ class McpViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         refreshTools()
+        updateIpAddress()
+    }
+
+    /** 获取设备局域网 IP 地址 */
+    private fun updateIpAddress() {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val intf = interfaces.nextElement()
+                if (intf.isLoopback || !intf.isUp) continue
+                val addrs = intf.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val addr = addrs.nextElement()
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                        _ipAddress.value = addr.hostAddress ?: "127.0.0.1"
+                        return
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // 保持默认值
+        }
     }
 
     /** 从注册表同步工具列表到 UI 状态 */
@@ -195,7 +217,7 @@ class MainActivity : ComponentActivity() {
 
     /** 启动前台服务 */
     private fun startServer() {
-        val port = viewModel.port.value.toIntOrNull() ?: 2730
+        val port = viewModel.port.value.toIntOrNull() ?: 8024
         val intent = Intent(this, McpForegroundService::class.java).apply {
             action = McpForegroundService.ACTION_START
             putExtra(McpForegroundService.EXTRA_PORT, port)

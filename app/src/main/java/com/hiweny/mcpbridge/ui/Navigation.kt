@@ -69,7 +69,8 @@ fun McpNavHost(
         }
 
         composable(Route.WebView.route) {
-            WebViewScreen()
+            val port by viewModel.port.collectAsState()
+            WebViewScreen(serverPort = port.toIntOrNull() ?: 8024)
         }
 
         composable(Route.Settings.route) {

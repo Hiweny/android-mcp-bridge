@@ -9,11 +9,11 @@ import org.json.JSONObject
 /**
  * 基于 NanoHTTPD 的 MCP JSON-RPC over HTTP 服务端。
  *
- * 线程模型：NanoHTTPD 在自有线程池中调用 [serve]，工具的 suspend [execute]
- * 通过 runBlocking 桥接，因此不会阻塞主线程。
- *
- * 支持的 JSON-RPC 方法：initialize / ping / tools/list / tools/call /
- * resources/list / prompts/list。
+ * 支持的端点：
+ * - GET  /health  → 健康检查，返回 {"status":"ok"}
+ * - POST /mcp     → JSON-RPC 2.0 请求（initialize / tools/list / tools/call 等）
+ * - POST /        → 同 /mcp（兼容不带路径的请求）
+ * - OPTIONS *     → CORS 预检
  */
 class McpHttpServer(
     port: Int,
@@ -23,44 +23,61 @@ class McpHttpServer(
 ) : NanoHTTPD(port) {
 
     override fun serve(session: IHTTPSession): Response {
-        // 仅接受 POST
-        if (session.method != Method.POST) {
-            return newFixedLengthResponse(
-                Response.Status.METHOD_NOT_ALLOWED,
-                MIME_PLAINTEXT,
-                "Method not allowed: use POST"
-            )
+        val uri = session.uri ?: "/"
+
+        // CORS 预检
+        if (session.method == Method.OPTIONS) {
+            return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, ""))
         }
 
-        val body = readBody(session)
-        val response = try {
-            handleRpc(JSONObject(body))
-        } catch (e: Exception) {
-            JsonRpc.error(0, JsonRpc.PARSE_ERROR, "Parse error: ${e.message}")
+        // 健康检查
+        if (session.method == Method.GET && (uri == "/health" || uri == "/api/health")) {
+            val health = JSONObject().apply {
+                put("status", "ok")
+                put("server", serverName)
+                put("version", serverVersion)
+                put("toolCount", toolRegistry.getAll().size)
+                put("external_servers", org.json.JSONArray())
+            }
+            return corsResponse(newFixedLengthResponse(
+                Response.Status.OK, "application/json", health.toString()
+            ))
         }
 
-        val resp = newFixedLengthResponse(
-            Response.Status.OK,
-            "application/json",
-            response.toString()
-        )
-        // 允许局域网内 AI 客户端跨源调用
+        // JSON-RPC 端点：POST /mcp 或 POST /
+        if (session.method == Method.POST) {
+            val body = readBody(session)
+            val rpcResponse = try {
+                handleRpc(JSONObject(body))
+            } catch (e: Exception) {
+                JsonRpc.error(0, JsonRpc.PARSE_ERROR, "Parse error: ${e.message}")
+            }
+            return corsResponse(newFixedLengthResponse(
+                Response.Status.OK, "application/json", rpcResponse.toString()
+            ))
+        }
+
+        // 其他请求
+        return corsResponse(newFixedLengthResponse(
+            Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found: $uri"
+        ))
+    }
+
+    private fun corsResponse(resp: Response): Response {
         resp.addHeader("Access-Control-Allow-Origin", "*")
-        resp.addHeader("Access-Control-Allow-Headers", "Content-Type, Accept")
-        resp.addHeader("Access-Control-Allow-Methods", "POST, OPTIONS")
+        resp.addHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization")
+        resp.addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
         return resp
     }
 
     private fun readBody(session: IHTTPSession): String {
         val files = HashMap<String, String>()
         session.parseBody(files)
-        // NanoHTTPD 将原始 body 存入 "postData"
         return files["postData"] ?: ""
     }
 
     private fun handleRpc(request: JSONObject): JSONObject {
         val method = request.optString("method")
-        // id 可能是数字、字符串或 null
         val id = request.opt("id")
         val params = request.optJSONObject("params") ?: JSONObject()
 

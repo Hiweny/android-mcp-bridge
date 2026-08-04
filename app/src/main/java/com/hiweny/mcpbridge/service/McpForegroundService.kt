@@ -38,7 +38,7 @@ class McpForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                val port = intent.getIntExtra(EXTRA_PORT, 2730)
+                val port = intent.getIntExtra(EXTRA_PORT, 8024)
                 startForegroundCompat(port)
                 startServer(port)
             }
